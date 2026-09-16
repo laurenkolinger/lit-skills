@@ -90,7 +90,10 @@ class TestContractsThatMustNotDrift:
         from openpyxl import load_workbook
 
         out = sheet.build_workbook([{"key": "k"}], str(tmp_path / "w.xlsx"))
-        assert [c.value for c in load_workbook(out)[sheet.SHEET_TITLE][1]] == index.COLUMNS
+        headers = [c.value for c in load_workbook(out)[sheet.SHEET_TITLE][1]]
+        # The workbook appends one computed column the CSV does not carry.
+        assert headers[:-1] == index.COLUMNS
+        assert headers[-1] == sheet.MATCH_COLUMN
 
     def test_every_column_has_a_declared_width(self):
         assert set(sheet.COLUMN_WIDTHS) >= set(index.COLUMNS)

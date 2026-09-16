@@ -134,94 +134,118 @@ class TestWorkbookTabs:
         return load_workbook(out)
 
     def test_the_search_tab_is_first_so_it_is_what_opens(self, tmp_path, library):
-        wb = self.build(tmp_path, library)
-        assert wb.sheetnames[0] == sheet.SEARCH_TITLE
+        assert self.build(tmp_path, library).sheetnames[0] == sheet.SEARCH_TITLE
 
     def test_all_three_tabs_exist(self, tmp_path, library):
         wb = self.build(tmp_path, library)
         assert set(wb.sheetnames) == {sheet.SEARCH_TITLE, sheet.SHEET_TITLE, sheet.TAGS_TITLE}
 
-    def test_the_search_tab_holds_a_filter_formula_over_the_index(self, tmp_path, library):
-        wb = self.build(tmp_path, library)
-        formula = wb[sheet.SEARCH_TITLE]["A10"].value
-        assert formula.startswith("=")
-        assert "FILTER(" in formula
-        assert f"'{sheet.SHEET_TITLE}'" in formula
-
-    def test_the_filter_matches_whole_tags_only(self, tmp_path, library):
-        wb = self.build(tmp_path, library)
-        formula = wb[sheet.SEARCH_TITLE]["A10"].value
-        assert '"|"&$B$3&"|"' in formula
-
-    def test_an_empty_tag_box_does_not_exclude_everything(self, tmp_path, library):
-        wb = self.build(tmp_path, library)
-        formula = wb[sheet.SEARCH_TITLE]["A10"].value
-        assert formula.count('="",TRUE') >= 3
-
-    def test_the_search_tab_searches_free_text_too(self, tmp_path, library):
-        wb = self.build(tmp_path, library)
-        assert "$B$6" in wb[sheet.SEARCH_TITLE]["A10"].value
-
     def test_the_tags_tab_counts_each_tag(self, tmp_path, library):
-        wb = self.build(tmp_path, library)
-        tab = wb[sheet.TAGS_TITLE]
-        found = {}
-        for row in tab.iter_rows(min_row=5, values_only=True):
-            if row[1]:
-                found[row[1]] = row[2]
-        assert found["USVI"] == 2
-        assert found["AUV"] == 1
-        assert found["reef research"] == 2
+        tab = self.build(tmp_path, library)[sheet.TAGS_TITLE]
+        found = {r[1]: r[2] for r in tab.iter_rows(min_row=5, values_only=True) if r[1]}
+        assert found["USVI"] == 2 and found["AUV"] == 1 and found["reef research"] == 2
 
     def test_the_link_cell_is_a_real_hyperlink(self, tmp_path, library):
-        wb = self.build(tmp_path, library)
-        tab = wb[sheet.SHEET_TITLE]
-        cell = tab.cell(row=2, column=1)
-        assert cell.value == sheet.LINK_TEXT
-        assert cell.hyperlink is not None
+        cell = self.build(tmp_path, library)[sheet.SHEET_TITLE].cell(row=2, column=1)
+        assert cell.value == sheet.LINK_TEXT and cell.hyperlink is not None
 
     def test_the_index_rows_are_still_short(self, tmp_path, library):
-        wb = self.build(tmp_path, library)
-        tab = wb[sheet.SHEET_TITLE]
+        tab = self.build(tmp_path, library)[sheet.SHEET_TITLE]
         assert {tab.row_dimensions[r].height for r in range(2, tab.max_row + 1)} == {sheet.DATA_ROW_HEIGHT}
 
 
-class TestSearchFormulaPortability:
-    """The formula lives inside an xlsx, so it must parse under Excel grammar too."""
+class TestNoDynamicArrayFunctions:
+    """The lesson from 2026-09-16.
 
-    def formula(self, tmp_path, library):
+    Google Sheets opened the workbook, could not represent FILTER and SORT in the xlsx format,
+    replaced the formula with __xludf.DUMMYFUNCTION and saved that over the file. Nothing in
+    this workbook may use a function the format cannot carry.
+    """
+
+    BANNED = ("FILTER(", "SORT(", "SORTN(", "QUERY(", "UNIQUE(", "SEQUENCE(",
+              "XLOOKUP(", "LET(", "LAMBDA(", "TEXTJOIN(", "IFS(", "ARRAYFORMULA(")
+
+    def formulas(self, tmp_path, library):
         root, _ = library
         links.apply_links(root)
-        return load_workbook(os.path.join(root, "lit_index.xlsx"))[sheet.SEARCH_TITLE]["A10"].value
+        wb = load_workbook(os.path.join(root, "lit_index.xlsx"))
+        out = []
+        for name in wb.sheetnames:
+            for row in wb[name].iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str) and cell.value.startswith("="):
+                        out.append((name, cell.coordinate, cell.value))
+        return out
 
-    def test_it_uses_no_google_only_array_literal(self, tmp_path, library):
-        f = self.formula(tmp_path, library)
-        assert "{" not in f and "}" not in f
-
-    def test_it_filters_a_contiguous_range(self, tmp_path, library):
-        f = self.formula(tmp_path, library)
-        assert "FILTER('Lit index'!$A$2:$O$" in f
-
-    def test_it_still_matches_whole_tags_and_ignores_empty_boxes(self, tmp_path, library):
-        f = self.formula(tmp_path, library)
-        assert '"|"&$B$3&"|"' in f
-        assert f.count('="",TRUE') >= 3
-
-    def test_it_sorts_on_the_citations_column_of_the_returned_range(self, tmp_path, library):
-        from litkit import index as index_module
-
-        f = self.formula(tmp_path, library)
-        expected = index_module.COLUMNS.index("citations") - index_module.COLUMNS.index("link") + 1
-        assert f"), {expected}, FALSE)" in f
-
-    def test_the_result_headers_name_the_columns_actually_returned(self, tmp_path, library):
-        root, _ = library
-        links.apply_links(root)
-        tab = load_workbook(os.path.join(root, "lit_index.xlsx"))[sheet.SEARCH_TITLE]
-        from litkit import index as index_module
-
-        expected = index_module.COLUMNS[
-            index_module.COLUMNS.index("link"):index_module.COLUMNS.index("tags_all") + 1
+    def test_no_banned_function_appears_anywhere(self, tmp_path, library):
+        offenders = [
+            (s, c, f) for s, c, f in self.formulas(tmp_path, library)
+            for b in self.BANNED if b in f.upper()
         ]
-        actual = [tab.cell(row=9, column=i + 1).value for i in range(len(expected))]
-        assert actual == expected
+        assert offenders == [], f"dynamic-array functions found: {offenders[:3]}"
+
+    def test_no_array_literal_appears_anywhere(self, tmp_path, library):
+        assert not [f for _, _, f in self.formulas(tmp_path, library) if "{" in f]
+
+    def test_the_workbook_still_has_formulas(self, tmp_path, library):
+        """Guard against the ban being satisfied by having no formulas at all."""
+        assert len(self.formulas(tmp_path, library)) > 1
+
+
+class TestMatchColumn:
+    def build(self, tmp_path, library):
+        root, _ = library
+        links.apply_links(root)
+        return load_workbook(os.path.join(root, "lit_index.xlsx"))
+
+    def test_the_index_has_a_match_column_after_the_index_columns(self, tmp_path, library):
+        from litkit import index as index_module
+
+        tab = self.build(tmp_path, library)[sheet.SHEET_TITLE]
+        headers = [c.value for c in tab[1]]
+        assert headers[:-1] == index_module.COLUMNS
+        assert headers[-1] == sheet.MATCH_COLUMN
+
+    def test_every_data_row_carries_a_match_formula(self, tmp_path, library):
+        tab = self.build(tmp_path, library)[sheet.SHEET_TITLE]
+        column = len([c for c in tab[1]])
+        for line in range(2, tab.max_row + 1):
+            value = tab.cell(row=line, column=column).value
+            assert isinstance(value, str) and value.startswith("=AND(")
+
+    def test_the_match_formula_reads_the_search_boxes(self, tmp_path, library):
+        tab = self.build(tmp_path, library)[sheet.SHEET_TITLE]
+        formula = tab.cell(row=2, column=len([c for c in tab[1]])).value
+        for box in ("$B$3", "$B$4", "$B$5", "$B$6"):
+            assert f"Search!{box}" in formula
+
+    def test_an_empty_box_does_not_exclude_a_row(self, tmp_path, library):
+        tab = self.build(tmp_path, library)[sheet.SHEET_TITLE]
+        formula = tab.cell(row=2, column=len([c for c in tab[1]])).value
+        assert formula.count('="",TRUE') >= 3
+
+    def test_tags_are_matched_whole_not_as_fragments(self, tmp_path, library):
+        tab = self.build(tmp_path, library)[sheet.SHEET_TITLE]
+        formula = tab.cell(row=2, column=len([c for c in tab[1]])).value
+        assert '"|"&Search!$B$3&"|"' in formula
+
+    def test_free_text_searches_title_and_summary(self, tmp_path, library):
+        tab = self.build(tmp_path, library)[sheet.SHEET_TITLE]
+        formula = tab.cell(row=2, column=len([c for c in tab[1]])).value
+        assert formula.count("Search!$B$6") == 3  # the empty test plus title and summary
+
+    def test_the_match_column_is_not_in_the_csv(self, tmp_path, library):
+        from litkit import index as index_module
+
+        root, paths = library
+        assert sheet.MATCH_COLUMN not in index_module.COLUMNS
+        assert sheet.MATCH_COLUMN not in index_module.read_index(paths["index"])[0]
+
+    def test_the_search_tab_counts_the_matches(self, tmp_path, library):
+        tab = self.build(tmp_path, library)[sheet.SEARCH_TITLE]
+        assert str(tab["B16"].value).startswith("=COUNTIF(")
+
+    def test_the_search_tab_tells_the_reader_what_to_do(self, tmp_path, library):
+        tab = self.build(tmp_path, library)[sheet.SEARCH_TITLE]
+        body = " ".join(str(c.value) for row in tab.iter_rows() for c in row if c.value)
+        assert "filter arrow" in body and sheet.MATCH_COLUMN in body

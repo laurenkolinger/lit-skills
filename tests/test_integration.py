@@ -107,7 +107,8 @@ class TestFullRun:
         assert os.path.exists(workbook_path)
         loaded = load_workbook(workbook_path)[sheet.SHEET_TITLE]
         assert loaded.max_row == len(PAPERS) + 1
-        assert [c.value for c in loaded[1]] == index.COLUMNS
+        headers = [c.value for c in loaded[1]]
+        assert headers[:-1] == index.COLUMNS and headers[-1] == sheet.MATCH_COLUMN
         assert loaded.freeze_panes == "C2"
         assert loaded.auto_filter.ref is not None
 

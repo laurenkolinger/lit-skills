@@ -16,6 +16,9 @@ SHEET_TITLE = "Lit index"
 SEARCH_TITLE = "Search"
 TAGS_TITLE = "Tags"
 LINK_TEXT = "open"
+# A computed column the reader filters on. It is not an index column: it exists only in the
+# workbook, so the CSV stays free of spreadsheet machinery.
+MATCH_COLUMN = "match"
 DATA_ROW_HEIGHT = 20
 HEADER_ROW_HEIGHT = 26
 HEADER_FILL = "1F4E5A"
@@ -50,6 +53,7 @@ COLUMN_WIDTHS = {
     "source": 18,
     "date_added": 12,
     "notes": 24,
+    "match": 9,
 }
 
 NUMERIC_COLUMNS = {"citations", "citations_per_year", "year"}
@@ -117,7 +121,7 @@ def build_workbook(rows, output_path, columns=None):
     """
     if not output_path:
         raise ValueError("build_workbook needs an output path")
-    headers = list(columns or COLUMNS)
+    headers = list(columns or COLUMNS) + [MATCH_COLUMN]
 
     workbook = Workbook()
     sheet = workbook.active
@@ -155,6 +159,26 @@ def build_workbook(rows, output_path, columns=None):
             cell.alignment = data_alignment
         sheet.row_dimensions[row_number].height = DATA_ROW_HEIGHT
 
+    # Fill the match column. Every function here predates dynamic arrays, so the formula
+    # survives being opened and resaved by Google Sheets as an xlsx.
+    tags_letter = _column_letter(headers, "tags_all")
+    title_letter = _column_letter(headers, "title")
+    summary_letter = _column_letter(headers, "summary")
+    match_position = headers.index(MATCH_COLUMN) + 1
+    for offset in range(len(rows)):
+        line = offset + 2
+        tag_tests = " ".join(
+            f'IF(Search!$B${box}="",TRUE,ISNUMBER(SEARCH("|"&Search!$B${box}&"|",${tags_letter}{line}))),'
+            for box in (3, 4, 5)
+        )
+        text_test = (
+            f'IF(Search!$B$6="",TRUE,'
+            f'OR(ISNUMBER(SEARCH(Search!$B$6,${title_letter}{line})),'
+            f'ISNUMBER(SEARCH(Search!$B$6,${summary_letter}{line}))))'
+        )
+        cell = sheet.cell(row=line, column=match_position, value=f"=AND({tag_tests}{text_test})")
+        cell.alignment = data_alignment
+
     last_column = get_column_letter(len(headers))
     last_row = len(rows) + 1
     sheet.freeze_panes = "C2"
@@ -185,11 +209,12 @@ def _column_letter(headers, name):
 
 
 def _add_search_tab(workbook, headers, row_count):
-    """Add a tab that filters the index by up to three tags plus free text.
+    """Add a tab holding the search boxes that drive the match column on the index.
 
-    The formulas are Google Sheets formulas. Each tag is matched with its surrounding pipes,
-    so "AUV" matches the AUV tag and not a tag that merely contains those letters. An empty
-    input cell drops out of the filter rather than matching nothing.
+    Deliberately built from IF, AND, ISNUMBER and SEARCH only. FILTER and SORT are
+    dynamic-array functions, and the xlsx format cannot carry them: on 2026-09-16 Google Sheets
+    opened this workbook, found it could not represent them, replaced the formula with
+    __xludf.DUMMYFUNCTION and saved that back. Old functions survive the round trip.
 
     Parameters:
         workbook (openpyxl.Workbook): the workbook being built.
@@ -200,65 +225,59 @@ def _add_search_tab(workbook, headers, row_count):
         None
     """
     sheet = workbook.create_sheet(SEARCH_TITLE, 0)
-    last = row_count + 1
-    tags = _column_letter(headers, "tags_all")
-    quoted = f"'{SHEET_TITLE}'"
-    columns = {name: _column_letter(headers, name) for name in
-               ("link", "key", "year", "title", "impact", "citations", "tags_all", "summary")}
+    match_letter = _column_letter(headers, MATCH_COLUMN)
 
     sheet["A1"] = "Search the VICAR lit library"
     sheet["A1"].font = Font(bold=True, size=14)
-    sheet["A3"] = "Tag 1"
-    sheet["A4"] = "Tag 2"
-    sheet["A5"] = "Tag 3"
-    sheet["A6"] = "Words in title or summary"
-    for cell in ("A3", "A4", "A5", "A6"):
-        sheet[cell].font = Font(bold=True)
-    sheet["C3"] = "Type a tag, for example AUV. Leave a box empty to ignore it."
-    sheet["C4"] = "Tags must match the Tags tab exactly. All boxes are combined with AND."
-    sheet["C6"] = "Free text, for example bleaching or St. Thomas."
-    for cell in ("C3", "C4", "C6"):
-        sheet[cell].font = Font(italic=True, color="666666")
 
-    for cell in ("B3", "B4", "B5", "B6"):
-        sheet[cell].fill = PatternFill("solid", fgColor="FFF2CC")
-        sheet[cell].border = Border(*[Side(style="thin", color="BFBFBF")] * 4)
+    labels = ["Tag 1", "Tag 2", "Tag 3", "Words in title or summary"]
+    hints = [
+        "Type a tag exactly as it appears on the Tags tab, for example AUV.",
+        "Leave a box empty to ignore it. Boxes combine with AND.",
+        "",
+        "Free text, for example bleaching or St. Thomas.",
+    ]
+    for offset, (label, hint) in enumerate(zip(labels, hints)):
+        line = 3 + offset
+        sheet[f"A{line}"] = label
+        sheet[f"A{line}"].font = Font(bold=True)
+        box = sheet[f"B{line}"]
+        box.fill = PatternFill("solid", fgColor="FFF2CC")
+        box.border = Border(*[Side(style="thin", color="BFBFBF")] * 4)
+        if hint:
+            sheet[f"C{line}"] = hint
+            sheet[f"C{line}"].font = Font(italic=True, color="666666")
 
-    sheet["A8"] = "Matching papers"
-    sheet["A8"].font = Font(bold=True)
-    shown_names = COLUMNS[COLUMNS.index("link"):COLUMNS.index("tags_all") + 1]
-    for offset, label in enumerate(shown_names):
-        cell = sheet.cell(row=9, column=offset + 1, value=label)
-        cell.font = Font(bold=True, color=HEADER_FONT_COLOR)
-        cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
+    sheet["A8"] = "How to see the results"
+    sheet["A8"].font = Font(bold=True, size=12)
+    steps = [
+        "1. Type one or more tags into the yellow boxes above.",
+        f"2. Go to the '{SHEET_TITLE}' tab.",
+        f"3. Click the filter arrow on the '{MATCH_COLUMN}' column and tick TRUE only.",
+        "4. The rows left are your matches. Column A links straight to each PDF.",
+        "5. To start over, clear the yellow boxes and set that filter back to all.",
+    ]
+    for offset, step in enumerate(steps):
+        sheet[f"A{9 + offset}"] = step
 
-    def tag_condition(box):
-        """Build the FILTER condition for one tag input box."""
-        return (f'IF(${box}="",TRUE,ISNUMBER(SEARCH("|"&${box}&"|",'
-                f'{quoted}!${tags}$2:${tags}${last})))')
+    sheet["A16"] = "Matches right now"
+    sheet["A16"].font = Font(bold=True)
+    sheet["B16"] = f"=COUNTIF('{SHEET_TITLE}'!${match_letter}$2:${match_letter}${row_count + 1},TRUE)"
+    sheet["B16"].font = Font(bold=True, size=12)
+    sheet["C16"] = "out of " + str(row_count) + " papers"
+    sheet["C16"].font = Font(italic=True, color="666666")
 
-    title_col, summary_col = columns["title"], columns["summary"]
-    text_condition = (
-        f'IF($B$6="",TRUE,'
-        f'ISNUMBER(SEARCH($B$6,{quoted}!${title_col}$2:${title_col}${last}))+'
-        f'ISNUMBER(SEARCH($B$6,{quoted}!${summary_col}$2:${summary_col}${last})))'
+    sheet["A18"] = "If you would rather not use the boxes"
+    sheet["A18"].font = Font(bold=True)
+    sheet["A19"] = (
+        f"On the {SHEET_TITLE} tab, filter the tags_all column by condition, custom formula is:"
     )
-    # A contiguous range, not a {} array literal. The array literal is Google Sheets syntax
-    # and does not survive being stored in an xlsx, where formulas follow Excel grammar.
-    # Columns link through tags_all sit next to each other, so a plain range covers them.
-    first_shown, last_shown = _column_letter(headers, "link"), _column_letter(headers, "tags_all")
-    sort_on = headers.index("citations") - headers.index("link") + 1
-    sheet["A10"] = (
-        f'=IFERROR(SORT(FILTER({quoted}!${first_shown}$2:${last_shown}${last}, '
-        f'{tag_condition("B$3")}, {tag_condition("B$4")}, {tag_condition("B$5")}, '
-        f'{text_condition}), {sort_on}, FALSE), '
-        f'"No papers match. Check the spelling against the Tags tab.")'
-    )
+    tags_letter = _column_letter(headers, "tags_all")
+    sheet["A20"] = f'=AND(ISNUMBER(SEARCH("|AUV|",${tags_letter}2)),ISNUMBER(SEARCH("|USVI|",${tags_letter}2)))'
+    sheet["A20"].font = Font(name="Menlo", size=10)
 
-    for offset, name in enumerate(shown_names):
-        letter = get_column_letter(offset + 1)
-        sheet.column_dimensions[letter].width = COLUMN_WIDTHS.get(name, DEFAULT_COLUMN_WIDTH)
-    sheet.freeze_panes = "A10"
+    for letter, width in {"A": 62, "B": 30, "C": 46}.items():
+        sheet.column_dimensions[letter].width = width
 
 
 def _add_tags_tab(workbook, rows):
