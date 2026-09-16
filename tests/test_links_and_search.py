@@ -148,10 +148,10 @@ class TestWorkbookTabs:
         found = {r[1]: r[2] for r in tab.iter_rows(min_row=5, values_only=True) if r[1]}
         assert found["USVI"] == 2 and found["AUV"] == 1 and found["reef research"] == 2
 
-    def test_the_tags_tab_gives_a_paste_ready_filter_string(self, tmp_path, library):
+    def test_the_tags_tab_is_a_plain_vocabulary_reference(self, tmp_path, library):
         tab = self.build(tmp_path, library)[sheet.TAGS_TITLE]
-        strings = {r[1]: r[3] for r in tab.iter_rows(min_row=5, values_only=True) if r[1]}
-        assert strings["AUV"] == "|AUV|"
+        assert [tab.cell(row=4, column=i).value for i in range(1, 4)] == ["facet", "tag", "papers"]
+        assert tab.cell(row=4, column=4).value is None
 
     def test_the_link_cell_is_a_real_hyperlink(self, tmp_path, library):
         cell = self.build(tmp_path, library)[sheet.SHEET_TITLE].cell(row=2, column=1)
@@ -216,22 +216,29 @@ class TestReadMeTab:
         assert "FirstAuthor_Year_ShortTitle" in body
         assert "rename" in body.lower()
 
-    def test_it_states_both_setup_requirements(self, tmp_path, library):
-        body = self.text(tmp_path, library)
-        assert "Google Drive for Desktop" in body
-        assert "Claude Code account" in body
-
     def test_it_gives_the_skill_install_route(self, tmp_path, library):
         body = self.text(tmp_path, library)
         assert "github.com/laurenkolinger/lit-skills" in body
         assert "install.sh" in body
         assert "lit-ingest" in body and "lit-search" in body
 
-    def test_it_explains_how_to_filter_by_one_tag_and_by_two(self, tmp_path, library):
+    def test_it_does_not_teach_hand_filtering(self, tmp_path, library):
+        """Reading this library by hand is not the intended path, so the tab must not teach it."""
         body = self.text(tmp_path, library)
-        assert "Text contains" in body
-        assert "Custom formula" in body
-        assert "|AUV|" in body
+        for banned in ("Text contains", "Custom formula", "filter arrow", "Filter by condition",
+                       "ISNUMBER", "|AUV|"):
+            assert banned not in body, f"the Read me still teaches hand filtering: {banned}"
+
+    def test_it_points_the_reader_at_the_agent_instead(self, tmp_path, library):
+        body = self.text(tmp_path, library)
+        assert "Ask Claude" in body
+        assert "What do we have on" in body
+
+    def test_it_names_all_three_requirements(self, tmp_path, library):
+        body = self.text(tmp_path, library)
+        assert "Claude Code subscription" in body
+        assert "Google Drive for Desktop" in body
+        assert "The two skills" in body
 
     def test_it_warns_that_edits_here_are_overwritten(self, tmp_path, library):
         body = self.text(tmp_path, library)

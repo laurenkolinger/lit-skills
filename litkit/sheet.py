@@ -10,7 +10,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from .index import COLUMNS, TAG_DELIMITER, TAG_FACETS, build_tags_all
+from .index import COLUMNS, TAG_FACETS, build_tags_all
 
 SHEET_TITLE = "Lit index"
 TAGS_TITLE = "Tags"
@@ -206,13 +206,11 @@ def _add_tags_tab(workbook, rows):
 
     sheet["A1"] = "Every tag in the library, and how many papers carry it"
     sheet["A1"].font = Font(bold=True, size=14)
-    sheet["A2"] = "Copy a tag into the Search tab to filter by it."
+    sheet["A2"] = ("A reference for what the library actually covers. You do not need to use "
+                   "these by hand: ask the agent in plain language and it picks the tags.")
     sheet["A2"].font = Font(italic=True, color="666666")
 
-    sheet["A3"] = "See the Read me tab for how to filter the index by these tags."
-    sheet["A3"].font = Font(italic=True, color="666666")
-
-    for position, label in enumerate(["facet", "tag", "papers", "paste this to filter"]):
+    for position, label in enumerate(["facet", "tag", "papers"]):
         cell = sheet.cell(row=4, column=position + 1, value=label)
         cell.font = Font(bold=True, color=HEADER_FONT_COLOR)
         cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
@@ -223,17 +221,15 @@ def _add_tags_tab(workbook, rows):
             sheet.cell(row=line, column=1, value=facet.replace("_tags", "").replace("_", " "))
             sheet.cell(row=line, column=2, value=tag)
             sheet.cell(row=line, column=3, value=count)
-            sheet.cell(row=line, column=4, value=f"{TAG_DELIMITER}{tag}{TAG_DELIMITER}")
             sheet.row_dimensions[line].height = DATA_ROW_HEIGHT
             line += 1
 
     sheet.column_dimensions["A"].width = 18
     sheet.column_dimensions["B"].width = 34
     sheet.column_dimensions["C"].width = 10
-    sheet.column_dimensions["D"].width = 30
     sheet.freeze_panes = "A5"
     if line > 5:
-        sheet.auto_filter.ref = f"A4:D{line - 1}"
+        sheet.auto_filter.ref = f"A4:C{line - 1}"
 
 
 # Every column, in index order, with a definition a reader can act on.
@@ -259,8 +255,8 @@ COLUMN_DEFINITIONS = [
     ("citations_per_year", "Citations divided by the paper's age in years. This is what makes a "
                            "2024 paper comparable to a 1994 one."),
     ("impact", "A label derived from the two columns above. See the impact rules below."),
-    ("tags_all", "Every tag on the paper, joined with pipe characters. This is the column to "
-                 "filter on. Rebuilt automatically from the four tag columns, so never edit it."),
+    ("tags_all", "Every tag on the paper in one cell. This is what the search skill matches "
+                 "against. Rebuilt automatically from the four tag columns, so never edit it."),
     ("topic_tags", "What the paper is about: coral reef, bleaching, resilience, and so on."),
     ("method_tags", "How the work was done: AUV, photogrammetry, deep learning, telemetry."),
     ("region_tags", "Where: USVI, Caribbean, Belize, Pacific."),
@@ -289,9 +285,9 @@ IMPACT_RULES = [
 def _add_readme_tab(workbook, headers, row_count):
     """Add the documentation tab and put it first.
 
-    The spreadsheet travels to people who were not here when it was built, so it explains
-    itself: what the columns mean, how to filter it, how the impact label is derived, and how to
-    set up the Claude skill that maintains it.
+    The tab exists so someone who opens this file cold knows what it is, what the columns mean,
+    and how to set up the agent that actually searches it. Reading this library by hand is not
+    the intended path and the tab does not teach it.
 
     Parameters:
         workbook (openpyxl.Workbook): the workbook being built.
@@ -302,7 +298,6 @@ def _add_readme_tab(workbook, headers, row_count):
         None
     """
     sheet = workbook.create_sheet(README_TITLE, 0)
-    tags_letter = _column_letter(headers, "tags_all")
     line = 1
 
     heading = Font(bold=True, size=14, color=HEADER_FILL)
@@ -341,29 +336,68 @@ def _add_readme_tab(workbook, headers, row_count):
         nonlocal line
         line += 1
 
-    sheet.cell(row=1, column=1, value="VICAR lab literature library").font = Font(bold=True, size=18, color=HEADER_FILL)
+    sheet.cell(row=1, column=1, value="VICAR lab literature library").font = Font(
+        bold=True, size=18, color=HEADER_FILL)
     sheet.row_dimensions[1].height = 30
     line = 2
-    note(f"{row_count} papers. Every paper here has a PDF in the pdfs folder and exactly one row "
-         f"on the '{SHEET_TITLE}' tab.", quiet)
+    note(f"{row_count} papers. Every one has a PDF in the pdfs folder and exactly one row on "
+         f"the '{SHEET_TITLE}' tab.", quiet)
     gap()
 
     title("How to use this")
-    pair("Find a paper", f"Go to the '{SHEET_TITLE}' tab. Click the filter arrow on the "
-                         f"{tags_letter} column (tags_all), choose Filter by condition, then Text "
-                         f"contains, and type a tag wrapped in pipes, for example |AUV|.")
-    pair("Two tags at once", "Same menu, but choose Custom formula is, and enter an = sign "
-                             f"followed by: AND(ISNUMBER(SEARCH(\"|AUV|\",${tags_letter}2)),"
-                             f"ISNUMBER(SEARCH(\"|USVI|\",${tags_letter}2)))")
-    pair("Why the pipes", "Tags are wrapped in pipe characters so a search matches a whole tag. "
-                          "Searching AUV without pipes would also match AUV survey.")
-    pair("See every tag", f"The '{TAGS_TITLE}' tab lists each tag with how many papers carry it, "
-                          "and the exact string to paste.")
-    pair("Open a paper", "Click the word open in column A. It goes straight to the PDF in Drive.")
-    pair("Read a summary", "Click the cell. Long text is clipped on purpose so rows stay one line "
-                           "tall and the table stays scannable.")
-    pair("Add a paper", "Put the PDF in the ingest folder, then ask Claude to run the ingest. "
-                        "Everything else is automatic.")
+    note("Ask Claude. This spreadsheet is a record of what the lab holds, not a search tool. "
+         "Once the setup below is done, you talk to the library in plain language and it comes "
+         "back with specific papers and a reason for each one.")
+    gap()
+    note("Things you can ask:", subheading)
+    for question in [
+        "What do we have on AUV surveys in the USVI?",
+        "I am writing the methods section of a thesis chapter on photogrammetry. What should I read?",
+        "What are the five most important papers on reef fish spawning aggregations?",
+        "Which papers in the library use deep learning for coral image classification?",
+        "What has the lab published on sponges?",
+        "Find me recent work on stony coral tissue loss disease, last three years only.",
+    ]:
+        note("    " + question, mono)
+    gap()
+    note("To add papers: put the PDFs in the ingest folder and tell Claude to run the ingest. "
+         "It names the files, looks up the citations, writes the tags and summaries, and updates "
+         "this spreadsheet. You do not edit anything by hand.")
+    gap()
+
+    title("What you need, one time")
+    pair("1. A Claude Code subscription",
+         "Claude Code is the desktop and terminal app, not the claude.ai website. Any paid plan "
+         "that includes it works. Sign in with the account that has access.")
+    pair("2. Google Drive for Desktop",
+         "This folder must be synced onto the computer, not merely visible in a browser. The "
+         "agent opens real files on disk and Drive carries the changes back up. Without the "
+         "sync there is nothing for it to read. Check that you can see this folder in Finder.")
+    pair("3. The two skills",
+         "Skills teach Claude how this library works: the naming rules, the tag vocabulary, and "
+         "what it is not allowed to invent. Install them with the commands below.")
+    gap()
+
+    title("Installing the skills")
+    note("Open Claude Code in this folder and paste this. It does the whole thing:", subheading)
+    note("Install the literature library skills from https://github.com/laurenkolinger/"
+         "lit-skills by following the Install section of its README, then ask me where my "
+         "library lives.", mono)
+    gap()
+    note("Or run it yourself in a terminal:", subheading)
+    note("git clone https://github.com/laurenkolinger/lit-skills.git", mono)
+    note("cd lit-skills", mono)
+    note('./install.sh "<the full path to this Lit folder>"', mono)
+    gap()
+    note("The installer copies both skills into ~/.claude/skills, sets up the folder layout, and "
+         "prints one line to add to your shell profile so the agent knows where the library is.",
+         quiet)
+    gap()
+    pair("lit-search", "Answers questions about the library. It asks what you are working on, "
+                       "shows the topics actually present, then returns papers with a reason for "
+                       "each. It will not name a paper the lab does not hold.")
+    pair("lit-ingest", "Adds new PDFs from the ingest folder: names them to the standard, pulls "
+                       "the citation count, writes tags and a summary, and rebuilds this file.")
     gap()
 
     title("What each column means")
@@ -373,9 +407,9 @@ def _add_readme_tab(workbook, headers, row_count):
 
     title("How the impact label is decided")
     note("Raw citation counts favour old papers, so a paper is judged on its total and on its "
-         "rate. Whichever test it passes first sets the label. The rate is citations divided by "
-         "age in years, with a one year floor so a paper published this year is not divided by "
-         "zero.")
+         "rate, and whichever test it passes first sets the label. The rate is citations divided "
+         "by age in years, with a one year floor so a paper published this year is not divided "
+         "by zero.")
     gap()
     for label, rule in IMPACT_RULES:
         pair(label, rule, label_font=Font(bold=True, size=11))
@@ -388,47 +422,23 @@ def _add_readme_tab(workbook, headers, row_count):
     title("How the key works")
     note("A key looks like Nemeth_2005_PopulationCharacteristicsRecoveringVirginIslands. It is "
          "the first author's surname, the year, and the first few significant words of the "
-         "title. It is also the filename of the PDF, so a key always tells you which file to "
-         "open, and a filename always tells you which row to look at.")
-    note("Use the key when you refer to a paper in notes, in email or in a manuscript draft. "
-         "Titles get retyped and shortened; keys do not change.")
+         "title. It is also the PDF's filename, so a key always tells you which file to open and "
+         "a filename always tells you which row to look at.")
+    note("Use the key when you refer to a paper in notes, in email or in a draft. Titles get "
+         "retyped and shortened; keys do not change.")
     note("Never rename a PDF by hand. If a key is wrong it is because the metadata is wrong. Fix "
-         "the metadata and the key and filename are rebuilt to match.")
-    gap()
-
-    title("Setting up Claude to work with this folder")
-    note("Two things are needed, and both are one time.")
-    gap()
-    pair("1. Google Drive for Desktop", "This folder has to be synced to the computer, not just "
-         "visible in a browser. Claude reads and writes real files on disk, and Drive carries "
-         "the changes back up. Without the sync there is nothing for it to open.")
-    pair("2. A Claude Code account", "Claude Code is the terminal and desktop app, not the "
-         "website. Install it and sign in.")
-    gap()
-    note("Then install the two skills, which teach Claude how this library works:", subheading)
-    note("git clone https://github.com/laurenkolinger/lit-skills.git", mono)
-    note("cd lit-skills && ./install.sh \"<the full path to this Lit folder>\"", mono)
-    gap()
-    note("Or paste this to Claude and let it do the whole thing:", subheading)
-    note("Install the literature library skills from https://github.com/laurenkolinger/"
-         "lit-skills by following the Install section of its README, then ask me where my "
-         "library lives.", mono)
-    gap()
-    pair("lit-ingest", "Files new PDFs dropped in the ingest folder: names them, looks up the "
-                       "citation, writes tags and a summary, and updates this spreadsheet.")
-    pair("lit-search", "Answers questions like what do we have on AUVs in the USVI. It asks what "
-                       "you are working on, shows the topics actually present, and comes back "
-                       "with specific papers and a reason for each.")
+         "the metadata and the key and the filename are rebuilt to match.")
     gap()
 
     title("Rules this library keeps")
     note("A paper gets a row only when its PDF is actually here. Nothing is listed on a promise.")
     note("No citation is invented and no DOI is guessed. A lookup that returns a different paper "
-         "than the file is rejected, and the row says so in notes rather than looking confident.")
-    note("The CSV next to this file is the source of truth. This spreadsheet is built from it, "
-         "never the other way round, so anything typed here is overwritten on the next update.",
-         Font(bold=True, size=11, color="9C2500"))
+         "than the file is rejected, and the row says so in its notes rather than looking "
+         "confident.")
+    note("The CSV beside this file is the source of truth. This spreadsheet is generated from "
+         "it, never the other way round, so anything typed in here is overwritten on the next "
+         "update.", Font(bold=True, size=11, color="9C2500"))
 
-    sheet.column_dimensions["A"].width = 26
-    sheet.column_dimensions["B"].width = 108
+    sheet.column_dimensions["A"].width = 30
+    sheet.column_dimensions["B"].width = 104
     sheet.sheet_view.showGridLines = False
