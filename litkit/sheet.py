@@ -391,12 +391,23 @@ def readme_blocks(row_count):
 
     blocks = [
         b("title", "VICAR lab literature library"),
-        b("subtitle", f"{row_count} papers. Every paper has a PDF in this folder and one row in this index."),
+        b("subtitle", f"{row_count} papers, each with one PDF on disk and one row here describing it."),
         b("gap"),
 
-        b("heading", "Ask Claude in plain language"),
-        b("prose", "Open Claude Code in this folder and type a question. Claude reads the index "
-                   "and the PDFs, then answers with specific papers and why each one fits."),
+        b("heading", "What this is"),
+        b("prose", "This folder is the lab's shared library: one clean PDF and one row per "
+                   "paper, instead of five overlapping folders and old exports. Claude keeps the "
+                   "two in step, naming files, pulling citations, and writing rows as papers are "
+                   "added. You never edit this sheet by hand."),
+        b("gap"),
+
+        b("heading", "Why you ask instead of search"),
+        b("prose", "Scrolling through 243 rows only finds what you already know to look "
+                   "for. Ask Claude instead: it reads the summaries and the PDFs themselves, not "
+                   "just titles and tags, and can answer what the columns alone cannot."),
+        b("gap"),
+
+        b("heading", "Try asking things like"),
         b("bullet", "What do we have on thermal bleaching in the Caribbean?"),
         b("bullet", "Which papers used photogrammetry or structure from motion?"),
         b("bullet", "Five most cited papers on herbivory, and what each one found."),
@@ -404,13 +415,14 @@ def readme_blocks(row_count):
         b("bullet", "Which papers cover the US Virgin Islands?"),
         b("gap"),
 
-        b("heading", "Add papers"),
-        b("prose", "Drop PDFs in the ingest folder and tell Claude to run the ingest. Claude "
-                   "renames each file, pulls the citation record, writes the tags and the "
-                   "summary, and adds a row to the index."),
+        b("heading", "Adding a paper"),
+        b("prose", "Drop the PDF in the ingest folder and tell Claude to run the ingest. Claude "
+                   "renames the file, pulls the citation record, writes the tags and the "
+                   "summary, and adds the row."),
         b("gap"),
 
-        b("heading", "Set up, once"),
+        b("heading", "What you need before you start"),
+        b("prose", "Three things, each a one time setup."),
         b("pair", "The desktop or terminal app. The claude.ai website cannot open files on your "
                   "machine.", left="Claude Code subscription"),
         b("pair", "Sync this folder to your machine, because Claude opens the real PDFs on disk. "
