@@ -10,15 +10,12 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from .index import COLUMNS, TAG_FACETS, build_tags_all
+from .index import COLUMNS, TAG_DELIMITER, TAG_FACETS, build_tags_all
 
 SHEET_TITLE = "Lit index"
-SEARCH_TITLE = "Search"
 TAGS_TITLE = "Tags"
+README_TITLE = "Read me"
 LINK_TEXT = "open"
-# A computed column the reader filters on. It is not an index column: it exists only in the
-# workbook, so the CSV stays free of spreadsheet machinery.
-MATCH_COLUMN = "match"
 DATA_ROW_HEIGHT = 20
 HEADER_ROW_HEIGHT = 26
 HEADER_FILL = "1F4E5A"
@@ -53,7 +50,6 @@ COLUMN_WIDTHS = {
     "source": 18,
     "date_added": 12,
     "notes": 24,
-    "match": 9,
 }
 
 NUMERIC_COLUMNS = {"citations", "citations_per_year", "year"}
@@ -121,7 +117,7 @@ def build_workbook(rows, output_path, columns=None):
     """
     if not output_path:
         raise ValueError("build_workbook needs an output path")
-    headers = list(columns or COLUMNS) + [MATCH_COLUMN]
+    headers = list(columns or COLUMNS)
 
     workbook = Workbook()
     sheet = workbook.active
@@ -159,34 +155,14 @@ def build_workbook(rows, output_path, columns=None):
             cell.alignment = data_alignment
         sheet.row_dimensions[row_number].height = DATA_ROW_HEIGHT
 
-    # Fill the match column. Every function here predates dynamic arrays, so the formula
-    # survives being opened and resaved by Google Sheets as an xlsx.
-    tags_letter = _column_letter(headers, "tags_all")
-    title_letter = _column_letter(headers, "title")
-    summary_letter = _column_letter(headers, "summary")
-    match_position = headers.index(MATCH_COLUMN) + 1
-    for offset in range(len(rows)):
-        line = offset + 2
-        tag_tests = " ".join(
-            f'IF(Search!$B${box}="",TRUE,ISNUMBER(SEARCH("|"&Search!$B${box}&"|",${tags_letter}{line}))),'
-            for box in (3, 4, 5)
-        )
-        text_test = (
-            f'IF(Search!$B$6="",TRUE,'
-            f'OR(ISNUMBER(SEARCH(Search!$B$6,${title_letter}{line})),'
-            f'ISNUMBER(SEARCH(Search!$B$6,${summary_letter}{line}))))'
-        )
-        cell = sheet.cell(row=line, column=match_position, value=f"=AND({tag_tests}{text_test})")
-        cell.alignment = data_alignment
-
     last_column = get_column_letter(len(headers))
     last_row = len(rows) + 1
     sheet.freeze_panes = "C2"
     sheet.auto_filter.ref = f"A1:{last_column}{last_row}"
     sheet.sheet_view.showGridLines = True
 
-    _add_search_tab(workbook, headers, len(rows))
     _add_tags_tab(workbook, rows)
+    _add_readme_tab(workbook, headers, len(rows))
 
     parent = os.path.dirname(os.path.abspath(output_path))
     if parent:
@@ -206,78 +182,6 @@ def _column_letter(headers, name):
         str: the column letter, or ``A`` when the column is absent.
     """
     return get_column_letter(headers.index(name) + 1) if name in headers else "A"
-
-
-def _add_search_tab(workbook, headers, row_count):
-    """Add a tab holding the search boxes that drive the match column on the index.
-
-    Deliberately built from IF, AND, ISNUMBER and SEARCH only. FILTER and SORT are
-    dynamic-array functions, and the xlsx format cannot carry them: on 2026-09-16 Google Sheets
-    opened this workbook, found it could not represent them, replaced the formula with
-    __xludf.DUMMYFUNCTION and saved that back. Old functions survive the round trip.
-
-    Parameters:
-        workbook (openpyxl.Workbook): the workbook being built.
-        headers (list[str]): the column order on the index sheet.
-        row_count (int): how many data rows the index sheet holds.
-
-    Returns:
-        None
-    """
-    sheet = workbook.create_sheet(SEARCH_TITLE, 0)
-    match_letter = _column_letter(headers, MATCH_COLUMN)
-
-    sheet["A1"] = "Search the VICAR lit library"
-    sheet["A1"].font = Font(bold=True, size=14)
-
-    labels = ["Tag 1", "Tag 2", "Tag 3", "Words in title or summary"]
-    hints = [
-        "Type a tag exactly as it appears on the Tags tab, for example AUV.",
-        "Leave a box empty to ignore it. Boxes combine with AND.",
-        "",
-        "Free text, for example bleaching or St. Thomas.",
-    ]
-    for offset, (label, hint) in enumerate(zip(labels, hints)):
-        line = 3 + offset
-        sheet[f"A{line}"] = label
-        sheet[f"A{line}"].font = Font(bold=True)
-        box = sheet[f"B{line}"]
-        box.fill = PatternFill("solid", fgColor="FFF2CC")
-        box.border = Border(*[Side(style="thin", color="BFBFBF")] * 4)
-        if hint:
-            sheet[f"C{line}"] = hint
-            sheet[f"C{line}"].font = Font(italic=True, color="666666")
-
-    sheet["A8"] = "How to see the results"
-    sheet["A8"].font = Font(bold=True, size=12)
-    steps = [
-        "1. Type one or more tags into the yellow boxes above.",
-        f"2. Go to the '{SHEET_TITLE}' tab.",
-        f"3. Click the filter arrow on the '{MATCH_COLUMN}' column and tick TRUE only.",
-        "4. The rows left are your matches. Column A links straight to each PDF.",
-        "5. To start over, clear the yellow boxes and set that filter back to all.",
-    ]
-    for offset, step in enumerate(steps):
-        sheet[f"A{9 + offset}"] = step
-
-    sheet["A16"] = "Matches right now"
-    sheet["A16"].font = Font(bold=True)
-    sheet["B16"] = f"=COUNTIF('{SHEET_TITLE}'!${match_letter}$2:${match_letter}${row_count + 1},TRUE)"
-    sheet["B16"].font = Font(bold=True, size=12)
-    sheet["C16"] = "out of " + str(row_count) + " papers"
-    sheet["C16"].font = Font(italic=True, color="666666")
-
-    sheet["A18"] = "If you would rather not use the boxes"
-    sheet["A18"].font = Font(bold=True)
-    sheet["A19"] = (
-        f"On the {SHEET_TITLE} tab, filter the tags_all column by condition, custom formula is:"
-    )
-    tags_letter = _column_letter(headers, "tags_all")
-    sheet["A20"] = f'=AND(ISNUMBER(SEARCH("|AUV|",${tags_letter}2)),ISNUMBER(SEARCH("|USVI|",${tags_letter}2)))'
-    sheet["A20"].font = Font(name="Menlo", size=10)
-
-    for letter, width in {"A": 62, "B": 30, "C": 46}.items():
-        sheet.column_dimensions[letter].width = width
 
 
 def _add_tags_tab(workbook, rows):
@@ -305,7 +209,10 @@ def _add_tags_tab(workbook, rows):
     sheet["A2"] = "Copy a tag into the Search tab to filter by it."
     sheet["A2"].font = Font(italic=True, color="666666")
 
-    for position, label in enumerate(["facet", "tag", "papers"]):
+    sheet["A3"] = "See the Read me tab for how to filter the index by these tags."
+    sheet["A3"].font = Font(italic=True, color="666666")
+
+    for position, label in enumerate(["facet", "tag", "papers", "paste this to filter"]):
         cell = sheet.cell(row=4, column=position + 1, value=label)
         cell.font = Font(bold=True, color=HEADER_FONT_COLOR)
         cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
@@ -316,12 +223,212 @@ def _add_tags_tab(workbook, rows):
             sheet.cell(row=line, column=1, value=facet.replace("_tags", "").replace("_", " "))
             sheet.cell(row=line, column=2, value=tag)
             sheet.cell(row=line, column=3, value=count)
+            sheet.cell(row=line, column=4, value=f"{TAG_DELIMITER}{tag}{TAG_DELIMITER}")
             sheet.row_dimensions[line].height = DATA_ROW_HEIGHT
             line += 1
 
     sheet.column_dimensions["A"].width = 18
     sheet.column_dimensions["B"].width = 34
     sheet.column_dimensions["C"].width = 10
+    sheet.column_dimensions["D"].width = 30
     sheet.freeze_panes = "A5"
     if line > 5:
-        sheet.auto_filter.ref = f"A4:C{line - 1}"
+        sheet.auto_filter.ref = f"A4:D{line - 1}"
+
+
+# Every column, in index order, with a definition a reader can act on.
+COLUMN_DEFINITIONS = [
+    ("link", "Click to open this paper's PDF in Google Drive. Filled automatically."),
+    ("key", "The paper's permanent id, built as FirstAuthor_Year_ShortTitle. It is also the PDF's "
+            "filename without .pdf, so a key always tells you which file to open. Quote the key "
+            "when you refer to a paper in notes or in email, because titles get retyped and keys "
+            "do not. Never edit a key by hand: fix the metadata and the key and filename follow."),
+    ("filename", "The PDF in the pdfs folder. Always the key plus .pdf."),
+    ("authors", "Full author list, semicolons between names. Long lists are shortened here with "
+                "et al.; the CSV keeps every name."),
+    ("first_author", "First author surname only. Use this to sort or filter by person."),
+    ("year", "Publication year. Stored as a number so it sorts correctly."),
+    ("title", "Paper title, taken from the publisher record where one was found."),
+    ("journal", "Journal, book or report series."),
+    ("doi", "Digital Object Identifier, the permanent address of the paper. Blank means none was "
+            "found or the one on the page pointed at a different paper and was removed."),
+    ("url", "Publisher or open access link."),
+    ("citations", "Times this paper has been cited, from OpenAlex. Blank means no record was "
+                  "found, never zero."),
+    ("citations_retrieved", "The date that count was fetched. An old date means an old number."),
+    ("citations_per_year", "Citations divided by the paper's age in years. This is what makes a "
+                           "2024 paper comparable to a 1994 one."),
+    ("impact", "A label derived from the two columns above. See the impact rules below."),
+    ("tags_all", "Every tag on the paper, joined with pipe characters. This is the column to "
+                 "filter on. Rebuilt automatically from the four tag columns, so never edit it."),
+    ("topic_tags", "What the paper is about: coral reef, bleaching, resilience, and so on."),
+    ("method_tags", "How the work was done: AUV, photogrammetry, deep learning, telemetry."),
+    ("region_tags", "Where: USVI, Caribbean, Belize, Pacific."),
+    ("taxa_tags", "What organisms: scleractinia, sponge, Nassau grouper."),
+    ("vicar_relevance", "Which part of VICAR the paper serves: automation infrastructure, reef "
+                        "research, VICARIUS platform, STEM workforce, or background."),
+    ("summary", "Two to four sentences on what the study did and what it found. Click the cell "
+                "to read it all; the text is clipped so rows stay one line tall."),
+    ("key_findings", "The specific claims, separated by semicolons."),
+    ("source", "Which folder or person this copy came from."),
+    ("date_added", "When the row was created."),
+    ("notes", "Anything needing a human eye: a scanned PDF, a thin summary, or metadata that "
+              "did not match the file."),
+]
+
+IMPACT_RULES = [
+    ("high impact", "500 or more citations, or 40 or more per year"),
+    ("well cited", "100 or more citations, or 15 or more per year"),
+    ("standard", "10 or more citations"),
+    ("emerging", "Fewer than 10 citations and published within the last 3 years"),
+    ("low", "Everything else"),
+    ("unrated", "No citation record was found, so no judgement is made"),
+]
+
+
+def _add_readme_tab(workbook, headers, row_count):
+    """Add the documentation tab and put it first.
+
+    The spreadsheet travels to people who were not here when it was built, so it explains
+    itself: what the columns mean, how to filter it, how the impact label is derived, and how to
+    set up the Claude skill that maintains it.
+
+    Parameters:
+        workbook (openpyxl.Workbook): the workbook being built.
+        headers (list[str]): the column order on the index sheet.
+        row_count (int): how many papers the index holds.
+
+    Returns:
+        None
+    """
+    sheet = workbook.create_sheet(README_TITLE, 0)
+    tags_letter = _column_letter(headers, "tags_all")
+    line = 1
+
+    heading = Font(bold=True, size=14, color=HEADER_FILL)
+    subheading = Font(bold=True, size=11)
+    body = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    mono = Font(name="Menlo", size=10)
+    quiet = Font(italic=True, color="666666")
+
+    def title(text):
+        nonlocal line
+        line += 1
+        cell = sheet.cell(row=line, column=1, value=text)
+        cell.font = heading
+        sheet.row_dimensions[line].height = 26
+        line += 1
+
+    def pair(left, right, label_font=subheading):
+        nonlocal line
+        a = sheet.cell(row=line, column=1, value=left)
+        a.font = label_font
+        a.alignment = body
+        b = sheet.cell(row=line, column=2, value=right)
+        b.alignment = body
+        sheet.row_dimensions[line].height = max(15, 13 * (1 + len(str(right)) // 95))
+        line += 1
+
+    def note(text, font=None):
+        nonlocal line
+        cell = sheet.cell(row=line, column=1, value=text)
+        cell.font = font or Font(size=11)
+        cell.alignment = body
+        sheet.row_dimensions[line].height = max(15, 13 * (1 + len(str(text)) // 130))
+        line += 1
+
+    def gap():
+        nonlocal line
+        line += 1
+
+    sheet.cell(row=1, column=1, value="VICAR lab literature library").font = Font(bold=True, size=18, color=HEADER_FILL)
+    sheet.row_dimensions[1].height = 30
+    line = 2
+    note(f"{row_count} papers. Every paper here has a PDF in the pdfs folder and exactly one row "
+         f"on the '{SHEET_TITLE}' tab.", quiet)
+    gap()
+
+    title("How to use this")
+    pair("Find a paper", f"Go to the '{SHEET_TITLE}' tab. Click the filter arrow on the "
+                         f"{tags_letter} column (tags_all), choose Filter by condition, then Text "
+                         f"contains, and type a tag wrapped in pipes, for example |AUV|.")
+    pair("Two tags at once", "Same menu, but choose Custom formula is, and enter an = sign "
+                             f"followed by: AND(ISNUMBER(SEARCH(\"|AUV|\",${tags_letter}2)),"
+                             f"ISNUMBER(SEARCH(\"|USVI|\",${tags_letter}2)))")
+    pair("Why the pipes", "Tags are wrapped in pipe characters so a search matches a whole tag. "
+                          "Searching AUV without pipes would also match AUV survey.")
+    pair("See every tag", f"The '{TAGS_TITLE}' tab lists each tag with how many papers carry it, "
+                          "and the exact string to paste.")
+    pair("Open a paper", "Click the word open in column A. It goes straight to the PDF in Drive.")
+    pair("Read a summary", "Click the cell. Long text is clipped on purpose so rows stay one line "
+                           "tall and the table stays scannable.")
+    pair("Add a paper", "Put the PDF in the ingest folder, then ask Claude to run the ingest. "
+                        "Everything else is automatic.")
+    gap()
+
+    title("What each column means")
+    for name, definition in COLUMN_DEFINITIONS:
+        pair(name, definition, label_font=Font(bold=True, name="Menlo", size=10))
+    gap()
+
+    title("How the impact label is decided")
+    note("Raw citation counts favour old papers, so a paper is judged on its total and on its "
+         "rate. Whichever test it passes first sets the label. The rate is citations divided by "
+         "age in years, with a one year floor so a paper published this year is not divided by "
+         "zero.")
+    gap()
+    for label, rule in IMPACT_RULES:
+        pair(label, rule, label_font=Font(bold=True, size=11))
+    gap()
+    note("unrated is not a low score. It means no citation record was found, either because the "
+         "paper has no DOI in the file or because it is a report, thesis or preprint that "
+         "citation databases do not index.", quiet)
+    gap()
+
+    title("How the key works")
+    note("A key looks like Nemeth_2005_PopulationCharacteristicsRecoveringVirginIslands. It is "
+         "the first author's surname, the year, and the first few significant words of the "
+         "title. It is also the filename of the PDF, so a key always tells you which file to "
+         "open, and a filename always tells you which row to look at.")
+    note("Use the key when you refer to a paper in notes, in email or in a manuscript draft. "
+         "Titles get retyped and shortened; keys do not change.")
+    note("Never rename a PDF by hand. If a key is wrong it is because the metadata is wrong. Fix "
+         "the metadata and the key and filename are rebuilt to match.")
+    gap()
+
+    title("Setting up Claude to work with this folder")
+    note("Two things are needed, and both are one time.")
+    gap()
+    pair("1. Google Drive for Desktop", "This folder has to be synced to the computer, not just "
+         "visible in a browser. Claude reads and writes real files on disk, and Drive carries "
+         "the changes back up. Without the sync there is nothing for it to open.")
+    pair("2. A Claude Code account", "Claude Code is the terminal and desktop app, not the "
+         "website. Install it and sign in.")
+    gap()
+    note("Then install the two skills, which teach Claude how this library works:", subheading)
+    note("git clone https://github.com/laurenkolinger/lit-skills.git", mono)
+    note("cd lit-skills && ./install.sh \"<the full path to this Lit folder>\"", mono)
+    gap()
+    note("Or paste this to Claude and let it do the whole thing:", subheading)
+    note("Install the literature library skills from https://github.com/laurenkolinger/"
+         "lit-skills by following the Install section of its README, then ask me where my "
+         "library lives.", mono)
+    gap()
+    pair("lit-ingest", "Files new PDFs dropped in the ingest folder: names them, looks up the "
+                       "citation, writes tags and a summary, and updates this spreadsheet.")
+    pair("lit-search", "Answers questions like what do we have on AUVs in the USVI. It asks what "
+                       "you are working on, shows the topics actually present, and comes back "
+                       "with specific papers and a reason for each.")
+    gap()
+
+    title("Rules this library keeps")
+    note("A paper gets a row only when its PDF is actually here. Nothing is listed on a promise.")
+    note("No citation is invented and no DOI is guessed. A lookup that returns a different paper "
+         "than the file is rejected, and the row says so in notes rather than looking confident.")
+    note("The CSV next to this file is the source of truth. This spreadsheet is built from it, "
+         "never the other way round, so anything typed here is overwritten on the next update.",
+         Font(bold=True, size=11, color="9C2500"))
+
+    sheet.column_dimensions["A"].width = 26
+    sheet.column_dimensions["B"].width = 108
+    sheet.sheet_view.showGridLines = False

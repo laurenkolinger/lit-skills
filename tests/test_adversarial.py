@@ -204,16 +204,29 @@ class TestSheetAdversarial:
             for cell in row:
                 assert not cell.alignment.wrap_text
 
-    def test_the_workbook_xml_never_switches_wrapping_on(self, tmp_path):
-        import zipfile
+    def test_no_cell_on_the_index_sheet_wraps(self, tmp_path):
+        """The no-wrap rule is about the data table staying one line per row.
+
+        The Read me tab is prose and wraps on purpose, so this checks the index sheet only
+        rather than the whole workbook.
+        """
+        from openpyxl import load_workbook
 
         out = sheet.build_workbook(
             [{"key": "k", "summary": "long " * 300}], str(tmp_path / "nowrap2.xlsx")
         )
-        with zipfile.ZipFile(out) as archive:
-            styles = archive.read("xl/styles.xml").decode("utf-8")
-        assert 'wrapText="1"' not in styles
-        assert "wrapText=\"true\"" not in styles
+        tab = load_workbook(out)[sheet.SHEET_TITLE]
+        for row in tab.iter_rows():
+            for cell in row:
+                assert not cell.alignment.wrap_text
+
+    def test_the_read_me_tab_does_wrap_because_it_is_prose(self, tmp_path):
+        from openpyxl import load_workbook
+
+        out = sheet.build_workbook([{"key": "k"}], str(tmp_path / "wrap.xlsx"))
+        tab = load_workbook(out)[sheet.README_TITLE]
+        wrapped = [c for row in tab.iter_rows() for c in row if c.value and c.alignment.wrap_text]
+        assert wrapped, "the documentation tab should wrap its prose"
 
     def test_numeric_columns_become_numbers_so_sorting_works(self, tmp_path):
         from openpyxl import load_workbook
