@@ -226,7 +226,8 @@ def _add_search_tab(workbook, headers, row_count):
 
     sheet["A8"] = "Matching papers"
     sheet["A8"].font = Font(bold=True)
-    for offset, label in enumerate(["link", "key", "year", "title", "impact", "citations", "tags"]):
+    shown_names = COLUMNS[COLUMNS.index("link"):COLUMNS.index("tags_all") + 1]
+    for offset, label in enumerate(shown_names):
         cell = sheet.cell(row=9, column=offset + 1, value=label)
         cell.font = Font(bold=True, color=HEADER_FONT_COLOR)
         cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
@@ -242,19 +243,21 @@ def _add_search_tab(workbook, headers, row_count):
         f'ISNUMBER(SEARCH($B$6,{quoted}!${title_col}$2:${title_col}${last}))+'
         f'ISNUMBER(SEARCH($B$6,{quoted}!${summary_col}$2:${summary_col}${last})))'
     )
-    shown = ", ".join(
-        f'{quoted}!${columns[name]}$2:${columns[name]}${last}'
-        for name in ("link", "key", "year", "title", "impact", "citations", "tags_all")
-    )
+    # A contiguous range, not a {} array literal. The array literal is Google Sheets syntax
+    # and does not survive being stored in an xlsx, where formulas follow Excel grammar.
+    # Columns link through tags_all sit next to each other, so a plain range covers them.
+    first_shown, last_shown = _column_letter(headers, "link"), _column_letter(headers, "tags_all")
+    sort_on = headers.index("citations") - headers.index("link") + 1
     sheet["A10"] = (
-        f'=IFERROR(SORT(FILTER({{{shown}}}, '
+        f'=IFERROR(SORT(FILTER({quoted}!${first_shown}$2:${last_shown}${last}, '
         f'{tag_condition("B$3")}, {tag_condition("B$4")}, {tag_condition("B$5")}, '
-        f'{text_condition}), 6, FALSE), "No papers match. Check the spelling against the Tags tab.")'
+        f'{text_condition}), {sort_on}, FALSE), '
+        f'"No papers match. Check the spelling against the Tags tab.")'
     )
 
-    widths = {"A": 7, "B": 36, "C": 7, "D": 58, "E": 14, "F": 11, "G": 46}
-    for letter, width in widths.items():
-        sheet.column_dimensions[letter].width = width
+    for offset, name in enumerate(shown_names):
+        letter = get_column_letter(offset + 1)
+        sheet.column_dimensions[letter].width = COLUMN_WIDTHS.get(name, DEFAULT_COLUMN_WIDTH)
     sheet.freeze_panes = "A10"
 
 

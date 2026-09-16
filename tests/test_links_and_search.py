@@ -184,3 +184,44 @@ class TestWorkbookTabs:
         wb = self.build(tmp_path, library)
         tab = wb[sheet.SHEET_TITLE]
         assert {tab.row_dimensions[r].height for r in range(2, tab.max_row + 1)} == {sheet.DATA_ROW_HEIGHT}
+
+
+class TestSearchFormulaPortability:
+    """The formula lives inside an xlsx, so it must parse under Excel grammar too."""
+
+    def formula(self, tmp_path, library):
+        root, _ = library
+        links.apply_links(root)
+        return load_workbook(os.path.join(root, "lit_index.xlsx"))[sheet.SEARCH_TITLE]["A10"].value
+
+    def test_it_uses_no_google_only_array_literal(self, tmp_path, library):
+        f = self.formula(tmp_path, library)
+        assert "{" not in f and "}" not in f
+
+    def test_it_filters_a_contiguous_range(self, tmp_path, library):
+        f = self.formula(tmp_path, library)
+        assert "FILTER('Lit index'!$A$2:$O$" in f
+
+    def test_it_still_matches_whole_tags_and_ignores_empty_boxes(self, tmp_path, library):
+        f = self.formula(tmp_path, library)
+        assert '"|"&$B$3&"|"' in f
+        assert f.count('="",TRUE') >= 3
+
+    def test_it_sorts_on_the_citations_column_of_the_returned_range(self, tmp_path, library):
+        from litkit import index as index_module
+
+        f = self.formula(tmp_path, library)
+        expected = index_module.COLUMNS.index("citations") - index_module.COLUMNS.index("link") + 1
+        assert f"), {expected}, FALSE)" in f
+
+    def test_the_result_headers_name_the_columns_actually_returned(self, tmp_path, library):
+        root, _ = library
+        links.apply_links(root)
+        tab = load_workbook(os.path.join(root, "lit_index.xlsx"))[sheet.SEARCH_TITLE]
+        from litkit import index as index_module
+
+        expected = index_module.COLUMNS[
+            index_module.COLUMNS.index("link"):index_module.COLUMNS.index("tags_all") + 1
+        ]
+        actual = [tab.cell(row=9, column=i + 1).value for i in range(len(expected))]
+        assert actual == expected
