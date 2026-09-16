@@ -234,42 +234,31 @@ def _add_tags_tab(workbook, rows):
 
 # Every column, in index order, with a definition a reader can act on.
 COLUMN_DEFINITIONS = [
-    ("link", "Click to open this paper's PDF in Google Drive. Filled automatically."),
-    ("key", "The paper's permanent id, built as FirstAuthor_Year_ShortTitle. It is also the PDF's "
-            "filename without .pdf, so a key always tells you which file to open. Quote the key "
-            "when you refer to a paper in notes or in email, because titles get retyped and keys "
-            "do not. Never edit a key by hand: fix the metadata and the key and filename follow."),
-    ("filename", "The PDF in the pdfs folder. Always the key plus .pdf."),
-    ("authors", "Full author list, semicolons between names. Long lists are shortened here with "
-                "et al.; the CSV keeps every name."),
-    ("first_author", "First author surname only. Use this to sort or filter by person."),
-    ("year", "Publication year. Stored as a number so it sorts correctly."),
-    ("title", "Paper title, taken from the publisher record where one was found."),
+    ("link", "Opens the PDF."),
+    ("key", "Permanent id for the paper. Also the PDF filename."),
+    ("filename", "The PDF file on disk."),
+    ("authors", "Full author list. Long ones are shortened here with et al."),
+    ("first_author", "First author surname."),
+    ("year", "Publication year."),
+    ("title", "Paper title."),
     ("journal", "Journal, book or report series."),
-    ("doi", "Digital Object Identifier, the permanent address of the paper. Blank means none was "
-            "found or the one on the page pointed at a different paper and was removed."),
-    ("url", "Publisher or open access link."),
-    ("citations", "Times this paper has been cited, from OpenAlex. Blank means no record was "
-                  "found, never zero."),
-    ("citations_retrieved", "The date that count was fetched. An old date means an old number."),
-    ("citations_per_year", "Citations divided by the paper's age in years. This is what makes a "
-                           "2024 paper comparable to a 1994 one."),
-    ("impact", "A label derived from the two columns above. See the impact rules below."),
-    ("tags_all", "Every tag on the paper in one cell. This is what the search skill matches "
-                 "against. Rebuilt automatically from the four tag columns, so never edit it."),
-    ("topic_tags", "What the paper is about: coral reef, bleaching, resilience, and so on."),
-    ("method_tags", "How the work was done: AUV, photogrammetry, deep learning, telemetry."),
-    ("region_tags", "Where: USVI, Caribbean, Belize, Pacific."),
-    ("taxa_tags", "What organisms: scleractinia, sponge, Nassau grouper."),
-    ("vicar_relevance", "Which part of VICAR the paper serves: automation infrastructure, reef "
-                        "research, VICARIUS platform, STEM workforce, or background."),
-    ("summary", "Two to four sentences on what the study did and what it found. Click the cell "
-                "to read it all; the text is clipped so rows stay one line tall."),
-    ("key_findings", "The specific claims, separated by semicolons."),
-    ("source", "Which folder or person this copy came from."),
-    ("date_added", "When the row was created."),
-    ("notes", "Anything needing a human eye: a scanned PDF, a thin summary, or metadata that "
-              "did not match the file."),
+    ("doi", "DOI as published. Blank when none was confirmed."),
+    ("url", "Link to the published version."),
+    ("citations", "Citation count from OpenAlex. Blank means unknown, not zero."),
+    ("citations_retrieved", "Date that count was pulled."),
+    ("citations_per_year", "Citations divided by years since publication."),
+    ("impact", "Citation tier, defined below."),
+    ("tags_all", "Every tag in one cell. This is what the search skill matches."),
+    ("topic_tags", "Subject: coral reef, bleaching, disease, resilience."),
+    ("method_tags", "Approach: AUV, photogrammetry, deep learning, telemetry."),
+    ("region_tags", "Where the work happened."),
+    ("taxa_tags", "Species or groups studied."),
+    ("vicar_relevance", "Which part of VICAR the paper serves."),
+    ("summary", "Two to four sentences on what the study did and found."),
+    ("key_findings", "The results worth remembering."),
+    ("source", "Where this copy came from."),
+    ("date_added", "Date the row was created."),
+    ("notes", "Anything needing a human eye: a scan, a thin summary, a mismatch."),
 ]
 
 IMPACT_RULES = [
@@ -278,16 +267,15 @@ IMPACT_RULES = [
     ("standard", "10 or more citations"),
     ("emerging", "Fewer than 10 citations and published within the last 3 years"),
     ("low", "Everything else"),
-    ("unrated", "No citation record was found, so no judgement is made"),
+    ("unrated", "No citation record was found, so no judgment is made"),
 ]
 
 
 def _add_readme_tab(workbook, headers, row_count):
     """Add the documentation tab and put it first.
 
-    The tab exists so someone who opens this file cold knows what it is, what the columns mean,
-    and how to set up the agent that actually searches it. Reading this library by hand is not
-    the intended path and the tab does not teach it.
+    The copy lives in :func:`readme_blocks` and the layout in :func:`_render_readme`, so the
+    words can be rewritten without touching the spreadsheet mechanics.
 
     Parameters:
         workbook (openpyxl.Workbook): the workbook being built.
@@ -298,147 +286,184 @@ def _add_readme_tab(workbook, headers, row_count):
         None
     """
     sheet = workbook.create_sheet(README_TITLE, 0)
+    _render_readme(sheet, readme_blocks(row_count))
+
+
+# The Read me tab is a document, not a table. Prose is merged across both columns so it can
+# actually be read: on 2026-09-16 every prose line sat in the narrow left column and was cut off
+# at about thirty characters.
+README_LABEL_WIDTH = 30
+README_TEXT_WIDTH = 96
+README_CHARS_PER_LINE = 118
+README_LINE_HEIGHT = 15
+
+
+def _render_readme(sheet, blocks):
+    """Lay out the Read me tab from a list of blocks.
+
+    Parameters:
+        sheet (openpyxl.worksheet.worksheet.Worksheet): the tab to write into.
+        blocks (list[dict]): each with ``kind``, ``left`` and ``text``.
+
+    Returns:
+        int: the last row written.
+    """
+    ink = HEADER_FILL
+    styles = {
+        "title": Font(bold=True, size=18, color=ink),
+        "subtitle": Font(italic=True, size=11, color="666666"),
+        "heading": Font(bold=True, size=13, color=ink),
+        "prose": Font(size=11),
+        "label": Font(bold=True, size=11),
+        "code": Font(name="Menlo", size=10, color="1F4E5A"),
+        "bullet": Font(size=11, color="333333"),
+        "warn": Font(bold=True, size=11, color="9C2500"),
+    }
+    wrap = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+    def height_for(text, chars=README_CHARS_PER_LINE):
+        lines = 1 + len(str(text)) // max(1, chars)
+        return max(README_LINE_HEIGHT, README_LINE_HEIGHT * lines)
+
     line = 1
+    for block in blocks:
+        kind = block.get("kind", "prose")
+        text = str(block.get("text") or "")
+        left = str(block.get("left") or "")
 
-    heading = Font(bold=True, size=14, color=HEADER_FILL)
-    subheading = Font(bold=True, size=11)
-    body = Alignment(horizontal="left", vertical="top", wrap_text=True)
-    mono = Font(name="Menlo", size=10)
-    quiet = Font(italic=True, color="666666")
+        if kind == "gap":
+            sheet.row_dimensions[line].height = 8
+            line += 1
+            continue
 
-    def title(text):
-        nonlocal line
+        if kind == "pair":
+            label = sheet.cell(row=line, column=1, value=left)
+            label.font = styles["label"]
+            label.alignment = wrap
+            value = sheet.cell(row=line, column=2, value=text)
+            value.alignment = wrap
+            sheet.row_dimensions[line].height = height_for(text, chars=94)
+            line += 1
+            continue
+
+        # Everything else spans both columns so long lines are never clipped.
+        sheet.merge_cells(start_row=line, start_column=1, end_row=line, end_column=2)
+        cell = sheet.cell(row=line, column=1, value=("    " + text) if kind == "bullet" else text)
+        cell.alignment = wrap
+        if kind == "title":
+            cell.font = styles["title"]
+            sheet.row_dimensions[line].height = 30
+        elif kind == "heading":
+            cell.font = styles["heading"]
+            sheet.row_dimensions[line].height = 24
+        elif kind == "code":
+            cell.font = styles["code"]
+            cell.fill = PatternFill("solid", fgColor="F2F5F6")
+            sheet.row_dimensions[line].height = height_for(text)
+        elif kind == "warn":
+            cell.font = styles["warn"]
+            sheet.row_dimensions[line].height = height_for(text)
+        else:
+            cell.font = styles.get(kind, styles["prose"])
+            sheet.row_dimensions[line].height = height_for(text)
         line += 1
-        cell = sheet.cell(row=line, column=1, value=text)
-        cell.font = heading
-        sheet.row_dimensions[line].height = 26
-        line += 1
 
-    def pair(left, right, label_font=subheading):
-        nonlocal line
-        a = sheet.cell(row=line, column=1, value=left)
-        a.font = label_font
-        a.alignment = body
-        b = sheet.cell(row=line, column=2, value=right)
-        b.alignment = body
-        sheet.row_dimensions[line].height = max(15, 13 * (1 + len(str(right)) // 95))
-        line += 1
-
-    def note(text, font=None):
-        nonlocal line
-        cell = sheet.cell(row=line, column=1, value=text)
-        cell.font = font or Font(size=11)
-        cell.alignment = body
-        sheet.row_dimensions[line].height = max(15, 13 * (1 + len(str(text)) // 130))
-        line += 1
-
-    def gap():
-        nonlocal line
-        line += 1
-
-    sheet.cell(row=1, column=1, value="VICAR lab literature library").font = Font(
-        bold=True, size=18, color=HEADER_FILL)
-    sheet.row_dimensions[1].height = 30
-    line = 2
-    note(f"{row_count} papers. Every one has a PDF in the pdfs folder and exactly one row on "
-         f"the '{SHEET_TITLE}' tab.", quiet)
-    gap()
-
-    title("How to use this")
-    note("Ask Claude. This spreadsheet is a record of what the lab holds, not a search tool. "
-         "Once the setup below is done, you talk to the library in plain language and it comes "
-         "back with specific papers and a reason for each one.")
-    gap()
-    note("Things you can ask:", subheading)
-    for question in [
-        "What do we have on AUV surveys in the USVI?",
-        "I am writing the methods section of a thesis chapter on photogrammetry. What should I read?",
-        "What are the five most important papers on reef fish spawning aggregations?",
-        "Which papers in the library use deep learning for coral image classification?",
-        "What has the lab published on sponges?",
-        "Find me recent work on stony coral tissue loss disease, last three years only.",
-    ]:
-        note("    " + question, mono)
-    gap()
-    note("To add papers: put the PDFs in the ingest folder and tell Claude to run the ingest. "
-         "It names the files, looks up the citations, writes the tags and summaries, and updates "
-         "this spreadsheet. You do not edit anything by hand.")
-    gap()
-
-    title("What you need, one time")
-    pair("1. A Claude Code subscription",
-         "Claude Code is the desktop and terminal app, not the claude.ai website. Any paid plan "
-         "that includes it works. Sign in with the account that has access.")
-    pair("2. Google Drive for Desktop",
-         "This folder must be synced onto the computer, not merely visible in a browser. The "
-         "agent opens real files on disk and Drive carries the changes back up. Without the "
-         "sync there is nothing for it to read. Check that you can see this folder in Finder.")
-    pair("3. The two skills",
-         "Skills teach Claude how this library works: the naming rules, the tag vocabulary, and "
-         "what it is not allowed to invent. Install them with the commands below.")
-    gap()
-
-    title("Installing the skills")
-    note("Open Claude Code in this folder and paste this. It does the whole thing:", subheading)
-    note("Install the literature library skills from https://github.com/laurenkolinger/"
-         "lit-skills by following the Install section of its README, then ask me where my "
-         "library lives.", mono)
-    gap()
-    note("Or run it yourself in a terminal:", subheading)
-    note("git clone https://github.com/laurenkolinger/lit-skills.git", mono)
-    note("cd lit-skills", mono)
-    note('./install.sh "<the full path to this Lit folder>"', mono)
-    gap()
-    note("The installer copies both skills into ~/.claude/skills, sets up the folder layout, and "
-         "prints one line to add to your shell profile so the agent knows where the library is.",
-         quiet)
-    gap()
-    pair("lit-search", "Answers questions about the library. It asks what you are working on, "
-                       "shows the topics actually present, then returns papers with a reason for "
-                       "each. It will not name a paper the lab does not hold.")
-    pair("lit-ingest", "Adds new PDFs from the ingest folder: names them to the standard, pulls "
-                       "the citation count, writes tags and a summary, and rebuilds this file.")
-    gap()
-
-    title("What each column means")
-    for name, definition in COLUMN_DEFINITIONS:
-        pair(name, definition, label_font=Font(bold=True, name="Menlo", size=10))
-    gap()
-
-    title("How the impact label is decided")
-    note("Raw citation counts favour old papers, so a paper is judged on its total and on its "
-         "rate, and whichever test it passes first sets the label. The rate is citations divided "
-         "by age in years, with a one year floor so a paper published this year is not divided "
-         "by zero.")
-    gap()
-    for label, rule in IMPACT_RULES:
-        pair(label, rule, label_font=Font(bold=True, size=11))
-    gap()
-    note("unrated is not a low score. It means no citation record was found, either because the "
-         "paper has no DOI in the file or because it is a report, thesis or preprint that "
-         "citation databases do not index.", quiet)
-    gap()
-
-    title("How the key works")
-    note("A key looks like Nemeth_2005_PopulationCharacteristicsRecoveringVirginIslands. It is "
-         "the first author's surname, the year, and the first few significant words of the "
-         "title. It is also the PDF's filename, so a key always tells you which file to open and "
-         "a filename always tells you which row to look at.")
-    note("Use the key when you refer to a paper in notes, in email or in a draft. Titles get "
-         "retyped and shortened; keys do not change.")
-    note("Never rename a PDF by hand. If a key is wrong it is because the metadata is wrong. Fix "
-         "the metadata and the key and the filename are rebuilt to match.")
-    gap()
-
-    title("Rules this library keeps")
-    note("A paper gets a row only when its PDF is actually here. Nothing is listed on a promise.")
-    note("No citation is invented and no DOI is guessed. A lookup that returns a different paper "
-         "than the file is rejected, and the row says so in its notes rather than looking "
-         "confident.")
-    note("The CSV beside this file is the source of truth. This spreadsheet is generated from "
-         "it, never the other way round, so anything typed in here is overwritten on the next "
-         "update.", Font(bold=True, size=11, color="9C2500"))
-
-    sheet.column_dimensions["A"].width = 30
-    sheet.column_dimensions["B"].width = 104
+    sheet.column_dimensions["A"].width = README_LABEL_WIDTH
+    sheet.column_dimensions["B"].width = README_TEXT_WIDTH
     sheet.sheet_view.showGridLines = False
+    sheet.freeze_panes = "A2"
+    return line - 1
+
+def readme_blocks(row_count):
+    """The Read me tab copy, as layout blocks.
+
+    Kept apart from the rendering so the words can be rewritten without touching spreadsheet
+    mechanics, and so tests can read the copy directly.
+
+    Parameters:
+        row_count (int): how many papers the index holds.
+
+    Returns:
+        list[dict]: blocks with ``kind``, ``left`` and ``text``.
+    """
+    def b(kind, text="", left=""):
+        return {"kind": kind, "left": left, "text": text}
+
+    blocks = [
+        b("title", "VICAR lab literature library"),
+        b("subtitle", f"{row_count} papers. Every paper has a PDF in this folder and one row in this index."),
+        b("gap"),
+
+        b("heading", "Ask Claude in plain language"),
+        b("prose", "Open Claude Code in this folder and type a question. Claude reads the index "
+                   "and the PDFs, then answers with specific papers and why each one fits."),
+        b("bullet", "What do we have on thermal bleaching in the Caribbean?"),
+        b("bullet", "Which papers used photogrammetry or structure from motion?"),
+        b("bullet", "Five most cited papers on herbivory, and what each one found."),
+        b("bullet", "I am starting a thesis chapter on coral disease. What should I read first?"),
+        b("bullet", "Which papers cover the US Virgin Islands?"),
+        b("gap"),
+
+        b("heading", "Add papers"),
+        b("prose", "Drop PDFs in the ingest folder and tell Claude to run the ingest. Claude "
+                   "renames each file, pulls the citation record, writes the tags and the "
+                   "summary, and adds a row to the index."),
+        b("gap"),
+
+        b("heading", "Set up, once"),
+        b("pair", "The desktop or terminal app. The claude.ai website cannot open files on your "
+                  "machine.", left="Claude Code subscription"),
+        b("pair", "Sync this folder to your machine, because Claude opens the real PDFs on disk. "
+                  "You are set once the folder shows up in Finder.", left="Google Drive for Desktop"),
+        b("pair", "They give Claude the naming rules, the tag vocabulary, and the list of things "
+                  "it may not invent.", left="Two skills installed"),
+        b("gap"),
+
+        b("heading", "Install"),
+        b("prose", "Paste this to Claude:"),
+        b("code", "Install the literature library skills from "
+                  "https://github.com/laurenkolinger/lit-skills by following the Install section "
+                  "of its README, then ask me where my library lives."),
+        b("prose", "Or run three commands in a terminal:"),
+        b("code", "git clone https://github.com/laurenkolinger/lit-skills.git"),
+        b("code", "cd lit-skills"),
+        b("code", './install.sh "<path to this Lit folder>"'),
+        b("gap"),
+
+        b("heading", "The two skills"),
+        b("pair", "Answers questions about the library and recommends papers.", left="lit-search"),
+        b("pair", "Adds new papers from the ingest folder.", left="lit-ingest"),
+        b("gap"),
+
+        b("heading", "Columns"),
+    ]
+    blocks += [b("pair", definition, left=name) for name, definition in COLUMN_DEFINITIONS]
+    blocks += [
+        b("gap"),
+        b("heading", "How impact is set"),
+        b("prose", "Impact comes from the citation count and the citations per year, so an old "
+                   "paper and a new one are judged on comparable terms."),
+    ]
+    blocks += [b("pair", rule, left=label) for label, rule in IMPACT_RULES]
+    blocks += [
+        b("prose", "Unrated means the count is unknown, not low. An unrated paper may still be "
+                   "widely cited."),
+        b("gap"),
+
+        b("heading", "Keys"),
+        b("code", "Nemeth_2005_PopulationCharacteristicsRecoveringVirginIslands"),
+        b("prose", "A key is the first author surname, the year, and the first few real words of "
+                   "the title. The key is also the PDF filename. Refer to papers by key: people "
+                   "retype and shorten titles, so a title is not a reliable identifier. If you "
+                   "rename a PDF by hand, Claude can no longer match it to its row."),
+        b("gap"),
+
+        b("heading", "What Claude does and does not do"),
+        b("pair", "Claude adds a row only after the PDF is in this folder.", left="Adding a row"),
+        b("pair", "Claude leaves a citation or DOI blank when it cannot confirm one. It does not "
+                  "guess.", left="Citations and DOIs"),
+        b("warn", "lit_index.csv holds the real data. This spreadsheet is generated from it, so "
+                  "the next rebuild overwrites anything you type in here."),
+    ]
+    return blocks
+

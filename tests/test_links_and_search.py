@@ -163,7 +163,7 @@ class TestWorkbookTabs:
 
 
 class TestReadMeTab:
-    """The spreadsheet has to explain itself to someone who was not here when it was built."""
+    """The tab explains itself to whoever opens the file cold."""
 
     def text(self, tmp_path, library):
         root, _ = library
@@ -171,7 +171,7 @@ class TestReadMeTab:
         tab = load_workbook(os.path.join(root, "lit_index.xlsx"))[sheet.README_TITLE]
         return " ".join(str(c.value) for row in tab.iter_rows() for c in row if c.value)
 
-    def test_every_index_column_is_defined(self, tmp_path, library):
+    def test_every_index_column_is_defined(self):
         from litkit import index as index_module
 
         defined = dict(sheet.COLUMN_DEFINITIONS)
@@ -182,16 +182,14 @@ class TestReadMeTab:
 
         assert [c for c, _ in sheet.COLUMN_DEFINITIONS if c not in index_module.COLUMNS] == []
 
-    def test_every_definition_appears_on_the_tab(self, tmp_path, library):
+    def test_every_definition_is_one_short_line(self):
+        long_ones = [(n, d) for n, d in sheet.COLUMN_DEFINITIONS if len(d.split()) > 12]
+        assert long_ones == [], f"these definitions are too long: {long_ones}"
+
+    def test_every_column_name_appears_on_the_tab(self, tmp_path, library):
         body = self.text(tmp_path, library)
         for name, _ in sheet.COLUMN_DEFINITIONS:
-            assert name in body, f"{name} is not documented on the Read me tab"
-
-    def test_every_impact_label_and_its_rule_are_stated(self, tmp_path, library):
-        body = self.text(tmp_path, library)
-        for label, rule in sheet.IMPACT_RULES:
-            assert label in body
-            assert rule.split(",")[0][:24] in body
+            assert name in body, f"{name} is not documented"
 
     def test_the_impact_labels_match_the_ones_the_code_assigns(self):
         from litkit import enrich
@@ -205,47 +203,112 @@ class TestReadMeTab:
         from litkit import enrich
 
         body = self.text(tmp_path, library)
-        assert str(enrich.HIGH_IMPACT_TOTAL) in body
-        assert str(enrich.HIGH_IMPACT_PER_YEAR) in body
-        assert str(enrich.WELL_CITED_TOTAL) in body
-        assert str(enrich.WELL_CITED_PER_YEAR) in body
-        assert str(enrich.STANDARD_TOTAL) in body
+        for value in (enrich.HIGH_IMPACT_TOTAL, enrich.HIGH_IMPACT_PER_YEAR,
+                      enrich.WELL_CITED_TOTAL, enrich.WELL_CITED_PER_YEAR,
+                      enrich.STANDARD_TOTAL):
+            assert str(value) in body
 
-    def test_it_explains_what_a_key_is_and_not_to_rename_files(self, tmp_path, library):
-        body = self.text(tmp_path, library)
-        assert "FirstAuthor_Year_ShortTitle" in body
-        assert "rename" in body.lower()
+    def test_it_says_unrated_is_not_a_low_score(self, tmp_path, library):
+        body = self.text(tmp_path, library).lower()
+        assert "unrated means the count is unknown" in body
 
-    def test_it_gives_the_skill_install_route(self, tmp_path, library):
-        body = self.text(tmp_path, library)
-        assert "github.com/laurenkolinger/lit-skills" in body
-        assert "install.sh" in body
-        assert "lit-ingest" in body and "lit-search" in body
+    def test_it_explains_the_key_and_warns_against_renaming(self, tmp_path, library):
+        body = self.text(tmp_path, library).lower()
+        assert "first author surname" in body and "rename" in body
 
-    def test_it_does_not_teach_hand_filtering(self, tmp_path, library):
-        """Reading this library by hand is not the intended path, so the tab must not teach it."""
-        body = self.text(tmp_path, library)
-        for banned in ("Text contains", "Custom formula", "filter arrow", "Filter by condition",
-                       "ISNUMBER", "|AUV|"):
-            assert banned not in body, f"the Read me still teaches hand filtering: {banned}"
-
-    def test_it_points_the_reader_at_the_agent_instead(self, tmp_path, library):
-        body = self.text(tmp_path, library)
-        assert "Ask Claude" in body
-        assert "What do we have on" in body
-
-    def test_it_names_all_three_requirements(self, tmp_path, library):
+    def test_it_names_all_three_setup_requirements(self, tmp_path, library):
         body = self.text(tmp_path, library)
         assert "Claude Code subscription" in body
         assert "Google Drive for Desktop" in body
-        assert "The two skills" in body
+        assert "Two skills installed" in body
+
+    def test_it_gives_both_install_routes(self, tmp_path, library):
+        body = self.text(tmp_path, library)
+        assert "github.com/laurenkolinger/lit-skills" in body
+        assert "install.sh" in body
+        assert "git clone" in body
+
+    def test_it_names_both_skills(self, tmp_path, library):
+        body = self.text(tmp_path, library)
+        assert "lit-search" in body and "lit-ingest" in body
+
+    def test_it_points_at_the_agent_with_real_example_questions(self, tmp_path, library):
+        body = self.text(tmp_path, library)
+        assert "Ask Claude" in body
+        assert body.count("?") >= 4, "there should be several example questions"
+
+    def test_it_does_not_teach_hand_filtering(self, tmp_path, library):
+        body = self.text(tmp_path, library)
+        for banned in ("Text contains", "Custom formula", "filter arrow",
+                       "Filter by condition", "ISNUMBER", "|AUV|"):
+            assert banned not in body, f"still teaches hand filtering: {banned}"
 
     def test_it_warns_that_edits_here_are_overwritten(self, tmp_path, library):
-        body = self.text(tmp_path, library)
-        assert "source of truth" in body and "overwritten" in body
+        assert "overwrites" in self.text(tmp_path, library)
 
-    def test_it_says_unrated_is_not_a_low_score(self, tmp_path, library):
-        assert "unrated is not a low score" in self.text(tmp_path, library)
+    def test_the_copy_stays_short_enough_to_read(self):
+        blocks = sheet.readme_blocks(243)
+        words = sum(len(str(b["left"]).split()) + len(str(b["text"]).split()) for b in blocks)
+        assert words < 750, f"the Read me is {words} words, too long to scan"
+
+    def test_house_style_no_em_dashes_and_american_spelling(self):
+        body = " ".join(f"{b['left']} {b['text']}" for b in sheet.readme_blocks(243))
+        assert "\u2014" not in body and chr(8212) not in body
+        for british in ("favour", "colour", "behaviour", "analyse", "organise", "recognise",
+                        "judgement", "centre", "labour", "modelling", "prioritise"):
+            assert british not in body.lower(), f"British spelling: {british}"
+
+    def test_no_promotional_or_filler_language(self):
+        body = " ".join(f"{b['left']} {b['text']}" for b in sheet.readme_blocks(243)).lower()
+        for word in ("seamless", "powerful", "robust", "crucial", "vital", "groundbreaking",
+                     "leverage", "utilize", "reach out", "circle back", "it's worth noting"):
+            assert word not in body, f"promotional or filler language: {word}"
+
+
+class TestReadMeLayout:
+    """The layout bug on 2026-09-16: prose sat in a 30 character column and was cut off."""
+
+    def tab(self, tmp_path, library):
+        root, _ = library
+        links.apply_links(root)
+        return load_workbook(os.path.join(root, "lit_index.xlsx"))[sheet.README_TITLE]
+
+    def test_prose_spans_both_columns_so_it_is_never_clipped(self, tmp_path, library):
+        tab = self.tab(tmp_path, library)
+        merged = {str(r) for r in tab.merged_cells.ranges}
+        assert merged, "prose rows must be merged across A and B"
+
+    def test_a_long_prose_line_is_in_a_merged_row(self, tmp_path, library):
+        tab = self.tab(tmp_path, library)
+        merged_rows = {r.min_row for r in tab.merged_cells.ranges}
+        long_rows = [
+            c.row for row in tab.iter_rows() for c in row
+            if c.column == 1 and isinstance(c.value, str) and len(c.value) > 90
+        ]
+        unmerged = [r for r in long_rows if r not in merged_rows]
+        assert unmerged == [], f"long text left in the narrow column at rows {unmerged}"
+
+    def test_every_prose_row_is_tall_enough_for_its_text(self, tmp_path, library):
+        tab = self.tab(tmp_path, library)
+        for row in tab.iter_rows():
+            cell = row[0]
+            if isinstance(cell.value, str) and len(cell.value) > 120:
+                needed = sheet.README_LINE_HEIGHT * (1 + len(cell.value) // sheet.README_CHARS_PER_LINE)
+                assert tab.row_dimensions[cell.row].height >= needed * 0.9
+
+    def test_everything_wraps_rather_than_overflowing(self, tmp_path, library):
+        tab = self.tab(tmp_path, library)
+        for row in tab.iter_rows():
+            for cell in row:
+                if cell.value:
+                    assert cell.alignment.wrap_text, f"{cell.coordinate} does not wrap"
+
+    def test_the_text_column_is_wide(self, tmp_path, library):
+        tab = self.tab(tmp_path, library)
+        assert tab.column_dimensions["B"].width >= 90
+
+    def test_gridlines_are_off_so_it_reads_as_a_document(self, tmp_path, library):
+        assert self.tab(tmp_path, library).sheet_view.showGridLines is False
 
 
 class TestNoFormulasAtAll:
